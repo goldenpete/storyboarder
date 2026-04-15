@@ -25,9 +25,13 @@ try {
   fse.copySync(fixtureDirectory, workingFixtureDirectory)
 
   const projectPath = path.join(workingFixtureDirectory, 'multi-scene.fountain')
+  const electronArgs = [
+    '.',
+    ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : [])
+  ]
   const result = spawnSync(
     electronBinary,
-    ['.'],
+    electronArgs,
     {
       cwd: projectRoot,
       encoding: 'utf8',

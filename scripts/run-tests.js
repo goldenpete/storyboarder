@@ -79,6 +79,8 @@ const mainTests = allTestFiles.filter(isMainTest)
 const dependencyPath = (...parts) =>
   path.join(projectRoot, 'node_modules', ...parts)
 
+const isLinuxCi = process.platform === 'linux' && process.env.CI
+
 const runProcess = (label, command, args) => {
   console.log(`\n[tests] ${label}`)
   console.log(`[tests] ${[command, ...args].join(' ')}`)
@@ -103,10 +105,11 @@ const runElectronMocha = (label, args) => {
     dependencyPath('electron-mocha', 'bin', 'electron-mocha'),
     '-r',
     '@babel/register',
+    ...(isLinuxCi ? ['--no-sandbox'] : []),
     ...args
   ]
 
-  if (process.platform === 'linux' && process.env.CI && fs.existsSync('/usr/bin/xvfb-run')) {
+  if (isLinuxCi && fs.existsSync('/usr/bin/xvfb-run')) {
     runProcess(label, 'xvfb-run', ['-a', process.execPath, ...electronMochaArgs])
   } else {
     runProcess(label, process.execPath, electronMochaArgs)
@@ -114,9 +117,12 @@ const runElectronMocha = (label, args) => {
 }
 
 const runAppSmokeTest = () => {
-  const args = [path.join(projectRoot, 'scripts', 'smoke-test-app.js')]
+  const args = [
+    path.join(projectRoot, 'scripts', 'smoke-test-app.js'),
+    ...(isLinuxCi ? ['--no-sandbox'] : [])
+  ]
 
-  if (process.platform === 'linux' && process.env.CI && fs.existsSync('/usr/bin/xvfb-run')) {
+  if (isLinuxCi && fs.existsSync('/usr/bin/xvfb-run')) {
     runProcess('app smoke', 'xvfb-run', ['-a', process.execPath, ...args])
   } else {
     runProcess('app smoke', process.execPath, args)
