@@ -1,6 +1,43 @@
-const { ipcRenderer } = electron = require('electron')
+const { ipcRenderer } = require('electron')
 
 const service = {}
+const REQUEST_TIMEOUT_MS = 30000
+
+const requestBoardUpdate = channel =>
+  new Promise((resolve, reject) => {
+    let timeoutId
+
+    const cleanup = () => {
+      clearTimeout(timeoutId)
+      ipcRenderer.removeListener('update', onUpdate)
+      ipcRenderer.removeListener('shot-generator:error', onError)
+    }
+
+    const onUpdate = (event, { board }) => {
+      cleanup()
+
+      if (!board) {
+        reject(new Error('Storyboarder did not return a board update.'))
+        return
+      }
+
+      resolve(board)
+    }
+
+    const onError = (event, error = {}) => {
+      cleanup()
+      reject(new Error(error.message || 'Storyboarder failed to save the shot.'))
+    }
+
+    timeoutId = setTimeout(() => {
+      cleanup()
+      reject(new Error('Timed out waiting for Storyboarder to save the shot.'))
+    }, REQUEST_TIMEOUT_MS)
+
+    ipcRenderer.once('update', onUpdate)
+    ipcRenderer.once('shot-generator:error', onError)
+    ipcRenderer.send(channel)
+  })
 
 service.getStoryboarderFileData = () =>
   new Promise(resolve => {
@@ -39,20 +76,8 @@ service.loadBoardByUid = async uid => {
   ipcRenderer.send('shot-generator:loadBoardByUid', uid)
 }
 service.saveShot = () =>
-  new Promise(resolve => {
-    ipcRenderer.on('update', (event, { board }) => {
-      resolve({ board })
-    })
-    // ask main > Shot Generator > Storyboarder to save current board/sg to .storyboarder file
-    ipcRenderer.send("shot-generator:requestSaveShot")
-  })
+  requestBoardUpdate('shot-generator:requestSaveShot')
 service.insertShot = () =>
-  new Promise(resolve => {
-    ipcRenderer.on('update', (event, { board }) => {
-      resolve({ board })
-    })
-    // ask main > Shot Generator > Storyboarder to insert current board/sg as new board
-    ipcRenderer.send('shot-generator:requestInsertShot')
-  })
+  requestBoardUpdate('shot-generator:requestInsertShot')
 
 module.exports = service

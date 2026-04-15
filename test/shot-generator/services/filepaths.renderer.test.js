@@ -77,13 +77,19 @@ describe('filepaths', function () {
     it('can get system image file path', () => {
       assert.strictEqual(
         getAssetPath('image', `placeholder.png`),
-        'APP_DIR/data/shot-generator/images/placeholder.png'
+        path.normalize('APP_DIR/data/shot-generator/images/placeholder.png')
       )
     })
     it('can get user image file path', () => {
       assert.strictEqual(
         getAssetPath('image', `models/images/texture.png`),
-        'PROJECT_DIR/models/images/texture.png'
+        path.normalize('PROJECT_DIR/models/images/texture.png')
+      )
+    })
+    it('sanitizes unsafe user asset basenames', () => {
+      assert.strictEqual(
+        getAssetPath('attachable', 'models/attachables/mañana?.glb'),
+        path.normalize('PROJECT_DIR/models/attachables/manana.glb')
       )
     })
   })

@@ -3,15 +3,17 @@ import path from 'path'
 import fs from 'fs-extra'
 import log from '../../shared/storyboarder-electron-log'
 import ModelLoader from '../../services/model-loader'
+import { ensureSafeFilename } from '../../files/filename-sanitizer'
 
 const CopyFile = (storyboarderFilePath, absolutePath, type) => {
     let expectedFilepath = absolutePath
     if (ModelLoader.needsCopy({model: expectedFilepath, type})) {
       let src = expectedFilepath
+      let safeBasename = ensureSafeFilename(path.basename(expectedFilepath))
       let dst = path.join(
         path.dirname(storyboarderFilePath),
         ModelLoader.projectFolder(type),
-        path.basename(expectedFilepath)
+        safeBasename
       )
       log.info('will copy from', src, 'to', dst)
       // make sure the path exists

@@ -54,6 +54,12 @@ const exporterCopyProject = require('../exporters/copy-project')
 const exporterArchive = require('../exporters/archive')
 const exporterWeb = require('../exporters/web')
 const exporterPsd = require('../exporters/psd')
+const { writeFileAtomicSync } = require('../files/atomic-file-writer')
+const { writeSceneFile } = require('../files/storyboarder-file')
+const {
+  createSceneDirectoryName,
+  findSceneDirectoryForScene
+} = require('../files/scene-paths')
 
 const importerPsd = require('../importers/psd')
 
@@ -263,6 +269,7 @@ let boardFileDirty = false
 let boardFileDirtyTimer
 
 let recordingToBoardIndex = undefined
+let queuedImageFileSave = false
 
 let linkedFileManager
 
@@ -2426,11 +2433,7 @@ let saveBoardFile = (opt = { force: false }) => {
     if (opt.force || prefsModule.getPrefs()['enableAutoSave']) {
 
       try {
-        // save to backup file
-        let backupFilePath = boardFilename + '.backup-' + Date.now()
-        fs.writeFileSync(backupFilePath, JSON.stringify(boardData, null, 2))
-        // swap backup file for actual file
-        fs.moveSync(backupFilePath, boardFilename, { overwrite: true })
+        writeSceneFile(boardFilename, boardData)
 
         boardFileDirty = false
         log.info('saved board file:', boardFilename)
@@ -2494,7 +2497,18 @@ const onDrawIdle = () => {
 let saveDataURLtoFile = (dataURL, filename) => {
   let imageData = dataURL.replace(/^data:image\/\w+;base64,/, '')
   let imageFilePath = path.join(boardPath, 'images', filename)
-  fs.writeFileSync(imageFilePath, imageData, 'base64')
+  writeFileAtomicSync(imageFilePath, imageData, { encoding: 'base64' })
+}
+
+let finalizeSaveImageFile = value => {
+  isSavingImageFile = false
+
+  if (queuedImageFileSave) {
+    queuedImageFileSave = false
+    return saveImageFile()
+  }
+
+  return value
 }
 
 //
@@ -2509,6 +2523,11 @@ let saveDataURLtoFile = (dataURL, filename) => {
 let saveImageFile = async () => {
   log.info('main-window#saveImageFile')
 
+  if (isSavingImageFile) {
+    queuedImageFileSave = true
+    return currentBoard
+  }
+
   isSavingImageFile = true
 
   let indexToSave = currentBoard
@@ -2518,8 +2537,7 @@ let saveImageFile = async () => {
     // wait, then retry
     log.warn('Still drawing. Not ready to save yet. Retry in 5s')
     imageFileDirtyTimer = setTimeout(saveImageFile, 5000)
-    isSavingImageFile = false
-    return
+    return finalizeSaveImageFile(currentBoard)
   }
 
   const imagesPath = path.join(boardPath, 'images')
@@ -2575,10 +2593,10 @@ let saveImageFile = async () => {
   // export layers to PNG
   for (let { index, layer, imageFilePath } of exportables) {
     log.info(`\tsaving layer “${layer.name}” to ${imageFilePath}`)
-    fs.writeFileSync(
+    writeFileAtomicSync(
       imageFilePath,
       storyboarderSketchPane.exportLayer(index, 'base64'),
-      'base64'
+      { encoding: 'base64' }
     )
 
     storyboarderSketchPane.clearLayerDirty(index)
@@ -2601,9 +2619,7 @@ let saveImageFile = async () => {
     // TODO save a posterframe?
   }
 
-  isSavingImageFile = false
-
-  return indexToSave
+  return finalizeSaveImageFile(indexToSave)
 
   /*
   let layersData = [
@@ -2741,10 +2757,10 @@ const savePosterFrame = async (board, forceReadFromFiles = false, blank = false)
   }
 
   // save to a file
-  fs.writeFileSync(
+  writeFileAtomicSync(
     imageFilePath,
     canvas.toDataURL('image/jpeg').replace(/^data:image\/\w+;base64,/, ''),
-    'base64'
+    { encoding: 'base64' }
   )
 
   log.info('saved posterframe', path.basename(imageFilePath))
@@ -3181,7 +3197,7 @@ const saveThumbnailFile = async (index, options = { forceReadFromFiles: false, b
     .toDataURL('image/png')
     .replace(/^data:image\/\w+;base64,/, '')
 
-  fs.writeFileSync(imageFilePath, imageData, 'base64')
+  writeFileAtomicSync(imageFilePath, imageData, { encoding: 'base64' })
 
   log.info('saved thumbnail', path.basename(imageFilePath), 'at index:', index)
 
@@ -4664,51 +4680,22 @@ let loadScene = async (sceneNumber) => {
 
   for (var node of scriptData) {
     if (node.type == 'scene') {
+      sceneCount++
+
       // does the boardfile/directory exist?
       if (sceneNumber == (Number(node.scene_number)-1)) {
         // load script
-        sceneCount++
-        let directoryFound = false
         let foundDirectoryName
 
         log.info('scene:')
         log.info(node)
+        foundDirectoryName = findSceneDirectoryForScene(node, boardsDirectoryFolders, sceneCount)
 
-        let id
-
-        if (node.scene_id) {
-          id = node.scene_id.split('-')
-          if (id.length>1) {
-            id = id[1]
-          } else {
-            id = id[0]
-          }
-        } else {
-          id = 'G' + sceneCount
-        }
-
-        for (var directory of boardsDirectoryFolders) {
-          let directoryId = directory.split('-')
-          directoryId = directoryId[directoryId.length - 1]
-          if (directoryId == id) {
-            directoryFound = true
-            foundDirectoryName = directory
-            log.info("FOUND THE DIRECTORY!!!!")
-            break
-          }
-        }
-
-        if (!directoryFound) {
+        if (!foundDirectoryName) {
           log.info(node)
           log.info("MAKE DIRECTORY")
 
-          let directoryName = 'Scene-' + node.scene_number + '-'
-          if (node.synopsis) {
-            directoryName += node.synopsis.substring(0, 50).replace(/\|&;\$%@"<>\(\)\+,/g, '').replace(/\./g, '').replace(/ - /g, ' ').replace(/ /g, '-').replace(/[|&;/:$%@"{}?|<>()+,]/g, '-')
-          } else {
-            directoryName += node.slugline.substring(0, 50).replace(/\|&;\$%@"<>\(\)\+,/g, '').replace(/\./g, '').replace(/ - /g, ' ').replace(/ /g, '-').replace(/[|&;/:$%@"{}?|<>()+,]/g, '-')
-          }
-          directoryName += '-' + node.scene_id
+          let directoryName = createSceneDirectoryName(node, sceneCount)
 
           log.info(directoryName)
           // make directory
@@ -4724,7 +4711,7 @@ let loadScene = async (sceneNumber) => {
           }
           boardFilename = path.join(currentPath, directoryName, directoryName + '.storyboarder')
           boardData = newBoardObject
-          fs.writeFileSync(boardFilename, JSON.stringify(newBoardObject, null, 2))
+          writeSceneFile(boardFilename, newBoardObject)
           // make storyboards directory
           fs.mkdirSync(path.join(currentPath, directoryName, 'images'))
 
@@ -7099,9 +7086,7 @@ const saveToBoardFromShotGenerator = async ({ uid, data, images }) => {
   let index = boardData.boards.findIndex(b => b.uid === uid)
 
   if (index === -1) {
-    log.error(`board with uid ${uid} does not exist`)
-    alert('Could not save shot: missing board.')
-    return
+    throw new Error(`Could not save shot: board with uid ${uid} does not exist.`)
   }
 
   // make a reference
@@ -7193,30 +7178,42 @@ const saveToBoardFromShotGenerator = async ({ uid, data, images }) => {
   }
 
   renderShotGeneratorPanel()
+
+  return boardData.boards[index]
 }
 ipcRenderer.on('saveShot', async (event, { uid, data, images }) => {
-  storeUndoStateForScene(true)
-  await saveToBoardFromShotGenerator({ uid, data, images })
-  storeUndoStateForScene()
-  
-  ipcRenderer.send('shot-generator:update', {
-    board: boardData.boards.find(board => board.uid === uid)
-  })
+  try {
+    storeUndoStateForScene(true)
+    const board = await saveToBoardFromShotGenerator({ uid, data, images })
+    storeUndoStateForScene()
+
+    ipcRenderer.send('shot-generator:update', { board })
+  } catch (error) {
+    log.error(error)
+    ipcRenderer.send('shot-generator:error', {
+      message: error.message
+    })
+  }
 })
 ipcRenderer.on('insertShot', async (event, { data, images, currentBoard }) => {
-  let position = boardData.boards.map(board => board.uid).indexOf(currentBoard.uid);
-  let index = await newBoard(position + 1)
-  await gotoBoard(index)
+  try {
+    let position = boardData.boards.map(board => board.uid).indexOf(currentBoard.uid);
+    let index = await newBoard(position + 1)
+    await gotoBoard(index)
 
-  let uid = boardData.boards[index].uid
+    let uid = boardData.boards[index].uid
 
-  storeUndoStateForScene(true)
-  await saveToBoardFromShotGenerator({ uid, data, images })
-  storeUndoStateForScene()
+    storeUndoStateForScene(true)
+    const board = await saveToBoardFromShotGenerator({ uid, data, images })
+    storeUndoStateForScene()
 
-  ipcRenderer.send('shot-generator:update', {
-    board: boardData.boards[index]
-  })
+    ipcRenderer.send('shot-generator:update', { board })
+  } catch (error) {
+    log.error(error)
+    ipcRenderer.send('shot-generator:error', {
+      message: error.message
+    })
+  }
 })
 ipcRenderer.on('storyboarder:get-boards', event => {
   ipcRenderer.send('shot-generator:get-boards', {
@@ -7254,6 +7251,81 @@ ipcRenderer.on('storyboarder:get-state', event => {
       board
     }
   )
+})
+
+const runSmokeTest = async () => {
+  if (!boardData.boards.length) {
+    let index = await newBoard()
+    await gotoBoard(index)
+  }
+
+  let board = boardData.boards[currentBoard]
+  let smokeValue = `smoke-${Date.now()}`
+
+  board.notes = smokeValue
+  markBoardFileDirty()
+
+  await saveImageFile()
+  saveBoardFile({ force: true })
+
+  let savedData = JSON.parse(fs.readFileSync(boardFilename, 'utf8'))
+  let persistedBoard = savedData.boards.find(item => item.uid === board.uid)
+
+  if (!persistedBoard || persistedBoard.notes !== smokeValue) {
+    throw new Error('Smoke test failed to persist board changes to disk.')
+  }
+
+  if (scriptData) {
+    await loadScene(currentScene)
+
+    let reloadedBoard = boardData.boards.find(item => item.uid === board.uid)
+    if (!reloadedBoard || reloadedBoard.notes !== smokeValue) {
+      throw new Error('Smoke test failed to reload saved board data.')
+    }
+  }
+
+  let outputFilePath = await exporter.exportVideo(
+    boardData,
+    boardFilename,
+    {
+      shouldWatermark: true,
+      watermarkImagePath: watermarkModel.watermarkImagePath(
+        prefsModule.getPrefs(),
+        app.getPath('userData')
+      ),
+      progressCallback: () => {}
+    }
+  )
+
+  if (!outputFilePath || !fs.existsSync(outputFilePath)) {
+    throw new Error('Smoke test failed to export a video file.')
+  }
+
+  let outputStats = fs.statSync(outputFilePath)
+  if (outputStats.size <= 0) {
+    throw new Error('Smoke test exported an empty video file.')
+  }
+
+  return {
+    boardFilename,
+    boardUid: board.uid,
+    exportVideoPath: outputFilePath,
+    exportVideoSize: outputStats.size,
+    smokeValue
+  }
+}
+
+ipcRenderer.on('smoke-test:run', async () => {
+  try {
+    let result = await runSmokeTest()
+    ipcRenderer.send('smoke-test:complete', result)
+  } catch (error) {
+    log.error(error)
+    ipcRenderer.send('smoke-test:failure', {
+      message: error.message,
+      stack: error.stack
+    })
+  }
 })
 
 ipcRenderer.on('exportPDF:getProjectData-request', (event, ...args) => {

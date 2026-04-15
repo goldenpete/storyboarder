@@ -13,5 +13,10 @@ A clear and concise description of what you want to happen.
 **Describe alternatives you've considered**
 A clear and concise description of any alternative solutions or features you've considered.
 
+**Maintenance impact**
+- Does this touch Reliability, Compatibility, Build/Release, or Feature PR Review?
+- What user problem is blocked today without this?
+- What tests or smoke coverage would be needed before merge?
+
 **Additional context**
 Add any other context or screenshots about the feature request here.

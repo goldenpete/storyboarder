@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support policy
+    url: https://github.com/wonderunit/storyboarder/blob/master/docs/SUPPORT_POLICY.md
+    about: Read support scope and triage expectations before filing.
+  - name: Development baseline
+    url: https://github.com/wonderunit/storyboarder/blob/master/docs/DEVELOPMENT_BASELINE.md
+    about: Check the currently maintained toolchain and verification commands.

@@ -40,6 +40,7 @@ dist/
 !src/js/vendor/**/dist
 
 src/build
+artifacts/
 
 .vscode
 .idea

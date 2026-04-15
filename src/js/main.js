@@ -24,6 +24,8 @@ const analytics = require('./analytics')
 const fountain = require('./vendor/fountain')
 const fountainDataParser = require('./fountain-data-parser')
 const fountainSceneIdUtil = require('./fountain-scene-id-util')
+const { writeFileAtomicSync } = require('./files/atomic-file-writer')
+const { findSceneDirectoryForScene } = require('./files/scene-paths')
 
 const importerFinalDraft = require('./importers/final-draft')
 const xml2js = require('xml2js')
@@ -51,6 +53,10 @@ const LanguagePreferencesWindow = require('./windows/language-preferences/main')
 // 
 const createMenu = require('./main/menu')
 const menuBus = new EventEmitter()
+const createNoopAppServer = () => ({
+  on: () => {},
+  setCanImport: () => {}
+})
 
 /*
 TODO
@@ -70,9 +76,10 @@ auth.json can be saved/loaded, e.g.:
     )
 */
 const store = configureStore()
+const isSmokeTest = process.env.STORYBOARDER_SMOKE_TEST === '1'
 
 
-if (isDev) {
+if (isDev && !isSmokeTest) {
   const { default: installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } = require('electron-devtools-installer')
 
   app.whenReady().then(() => {
@@ -102,6 +109,16 @@ let powerSaveId = 0
 let previousScript
 
 let prefs = prefModule.getPrefs('main')
+let smokeTestDidFinish = false
+
+const finishSmokeTest = exitCode => {
+  if (smokeTestDidFinish) return
+
+  smokeTestDidFinish = true
+  process.exitCode = exitCode
+
+  setTimeout(() => app.quit(), 100)
+}
 
 // state
 let currentFile
@@ -286,32 +303,34 @@ app.on('ready', async () => {
     }
   }
 
-  appServer = new MobileServer()
-  appServer.on('pointerEvent', (e)=> {
-    log.info('pointerEvent')
-  })
-  appServer.on('image', (e) => {
-    mainWindow.webContents.send('newBoard', 1)
-    mainWindow.webContents.send('importImage', e.fileData)
-  })
-  appServer.on('worksheet', (e) => {
-    mainWindow.webContents.send('importWorksheets', [e.fileData])
-  })
-  appServer.on('error', err => {
-    if (err.errno === 'EADDRINUSE') {
-      // dialog.showMessageBox(null, {
-      //   type: 'error',
-      //   message: 'Could not start the mobile web app server. The port was already in use. Is Storyboarder already open?'
-      // })
-    } else {
-      dialog.showMessageBox(null, {
-        type: 'error',
-        message: err
-      })
-    }
-  })
+  appServer = isSmokeTest ? createNoopAppServer() : new MobileServer()
+  if (!isSmokeTest) {
+    appServer.on('pointerEvent', (e)=> {
+      log.info('pointerEvent')
+    })
+    appServer.on('image', (e) => {
+      mainWindow.webContents.send('newBoard', 1)
+      mainWindow.webContents.send('importImage', e.fileData)
+    })
+    appServer.on('worksheet', (e) => {
+      mainWindow.webContents.send('importWorksheets', [e.fileData])
+    })
+    appServer.on('error', err => {
+      if (err.errno === 'EADDRINUSE') {
+        // dialog.showMessageBox(null, {
+        //   type: 'error',
+        //   message: 'Could not start the mobile web app server. The port was already in use. Is Storyboarder already open?'
+        // })
+      } else {
+        dialog.showMessageBox(null, {
+          type: 'error',
+          message: err
+        })
+      }
+    })
 
-  await attemptLicenseVerification()
+    await attemptLicenseVerification()
+  }
 
 
 
@@ -325,6 +344,26 @@ app.on('ready', async () => {
 
   // open the welcome window when the app loads up first
   openWelcomeWindow()
+
+  if (process.env.STORYBOARDER_SMOKE_PROJECT) {
+    let filePath = path.resolve(process.env.STORYBOARDER_SMOKE_PROJECT)
+
+    if (fs.existsSync(filePath)) {
+      setTimeout(() => openFile(filePath), 300)
+
+      welcomeWindow.hide()
+      welcomeWindow.removeAllListeners('ready-to-show')
+      return
+    }
+
+    log.error('Could not load smoke test project', filePath)
+    dialog.showErrorBox(
+      'Could not load smoke test project',
+      `Error loading ${filePath}`
+    )
+    finishSmokeTest(1)
+    return
+  }
 
   // TODO why is loading via arg limited to dev mode only?
   // was an argument passed?
@@ -752,23 +791,8 @@ let processFountainData = (data, create, update) => {
         break
       case 'scene':
         metadata.sceneCount++
-        let id
-        if (node.scene_id) {
-          id = node.scene_id.split('-')
-          if (id.length>1) {
-            id = id[1]
-          } else {
-            id = id[0]
-          }
-        } else {
-          id = 'G' + metadata.sceneCount
-        }
-        for (var directory in boardsDirectoryFolders) {
-          if (directory.includes(id)) {
-            metadata.sceneBoardsCount++
-            // load board file and get stats and shit
-            break
-          }
+        if (findSceneDirectoryForScene(node, boardsDirectoryFolders, metadata.sceneCount)) {
+          metadata.sceneBoardsCount++
         }
         break
     }
@@ -988,7 +1012,11 @@ const createAndLoadProject = aspectRatio => {
     lastScene: 0,
     aspectRatio
   }
-  fs.writeFileSync(path.join(currentPath, 'storyboard.settings'), JSON.stringify(boardSettings))
+  writeFileAtomicSync(
+    path.join(currentPath, 'storyboard.settings'),
+    JSON.stringify(boardSettings),
+    { encoding: 'utf8' }
+  )
 
   setWatchedScript()
   addToRecentDocs(currentFile, currentScriptDataObject[3])
@@ -1516,6 +1544,10 @@ ipcMain.on('workspaceReady', event => {
     mainWindow.show()
   }
 
+  if (isSmokeTest && !smokeTestDidFinish) {
+    mainWindow.webContents.send('smoke-test:run')
+  }
+
   // only after the workspace is ready will it start getting future focus events
   mainWindow.on('focus', () => {
     mainWindow.webContents.send('focus')
@@ -1662,6 +1694,8 @@ menuBus.on('scale-ui-reset',
 
 menuBus.on('saveShot',
   (event, data) => mainWindow.webContents.send('saveShot', data))
+ipcMain.on('saveShot',
+  (event, data) => mainWindow.webContents.send('saveShot', data))
 ipcMain.on('insertShot',
   (event, data) => mainWindow.webContents.send('insertShot', data))
 ipcMain.on('storyboarder:get-boards',
@@ -1709,6 +1743,12 @@ ipcMain.on('shot-generator:update', (event, { board }) => {
     win.webContents.send('update', { board })
   }
 })
+ipcMain.on('shot-generator:error', (event, error) => {
+  let win = shotGeneratorWindow.getWindow()
+  if (win) {
+    win.webContents.send('shot-generator:error', error)
+  }
+})
 ipcMain.on('shot-generator:loadBoardByUid', (event, uid) => {
   let win = shotGeneratorWindow.getWindow()
   if (win) {
@@ -1733,6 +1773,20 @@ ipcMain.on('shot-generator:updateStore', (event, action) => {
   if (win) {
     win.webContents.send('shot-generator:updateStore', action)
   }
+})
+
+ipcMain.on('smoke-test:complete', (event, result) => {
+  if (!isSmokeTest) return
+  log.info('[smoke-test] completed', result)
+
+  finishSmokeTest(0)
+})
+
+ipcMain.on('smoke-test:failure', (event, error = {}) => {
+  if (!isSmokeTest) return
+  log.error('[smoke-test] failed', error)
+
+  finishSmokeTest(1)
 })
 
 

@@ -1,4 +1,5 @@
 const path = require('path')
+const { ensureSafeFilename } = require('../../files/filename-sanitizer')
 
 function getSystemDirectoryFor (pathToShotGeneratorData) {
   return function systemDirectoryFor (type) {
@@ -58,12 +59,17 @@ function createAssetPathResolver (appDirectory, storyboarderFilePath) {
    * @param {string} filepath
    */
   return function getAssetPath (type, filepath = '') {
+    const basename = path.basename(filepath)
+    const safeBasename = basename
+      ? ensureSafeFilename(basename)
+      : ''
+
     if (filepath.match(/\//)) {
       // user paths
-      return path.join(projectDirectoryFor(type), path.basename(filepath))
+      return path.join(projectDirectoryFor(type), safeBasename)
     } else {
       // system paths
-      return path.join(systemDirectoryFor(type), path.basename(filepath))
+      return path.join(systemDirectoryFor(type), safeBasename)
     }
   }
 }

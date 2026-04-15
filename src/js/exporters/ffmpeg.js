@@ -5,23 +5,7 @@ const moment = require('moment')
 const tmp = require('tmp')
 const os = require('os')
 
-const reportedFfmpegPath = require('ffmpeg-static')
-
-// via https://github.com/sindresorhus/electron-util/blob/main/source/is-using-asar.js
-const isUsingAsar = () => {
-  if (!('electron' in process.versions)) return
-
-  let mainModule = process.type == 'renderer'
-    ? require('@electron/remote').process.mainModule
-    : require.main
-
-  return mainModule && mainModule.filename.includes('app.asar')
-}
-
-let ffmpegPath = reportedFfmpegPath
-if (isUsingAsar()) {
-  ffmpegPath = reportedFfmpegPath.replace('app.asar', 'app.asar.unpacked')
-}
+const { resolveFfmpegPath } = require('./ffmpeg-path')
 
 const boardModel = require('../models/board')
 const exporterCommon = require('../exporters/common')
@@ -44,6 +28,7 @@ const slash = input => {
 const checkVersion = async () =>
   new Promise((resolve, reject) => {
     let matchedVersion
+    const ffmpegPath = resolveFfmpegPath()
 
     console.log('Checking for ffmpeg at', ffmpegPath)
     const process = execa(ffmpegPath, [
@@ -70,6 +55,7 @@ const checkVersion = async () =>
 // via https://github.com/wulkano/kap/blob/5769d76587/app/src/scripts/convert.js
 const convert = async (opts, args) =>
   new Promise((resolve, reject) => {
+    const ffmpegPath = resolveFfmpegPath()
     const converter = execa(ffmpegPath, args)
     // let amountOfFrames
 

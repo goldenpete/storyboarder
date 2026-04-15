@@ -21,9 +21,16 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+ - OS and version:
+ - Architecture:
+ - Storyboarder version or commit:
+ - Project type: `.storyboarder`, Fountain, or Final Draft
+
+**Reliability details**
+ - Does this affect save/load, export, or Shot Generator persistence?
+ - Can you reproduce it from a fresh sample project?
+ - If you are running from source, attach the output of `npm run diagnostics:platform`.
+ - If relevant, attach logs, screenshots, or a minimal project.
 
 **Additional context**
 Add any other context about the problem here.

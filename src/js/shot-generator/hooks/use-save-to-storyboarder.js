@@ -13,6 +13,7 @@ import { ShadingType } from '../../vendor/shading-effects/ShadingType'
 
 import { SHOT_LAYERS } from '../utils/ShotLayers'
 import useShadingEffect from '../hooks/use-shading-effect'
+const REQUEST_TIMEOUT_MS = 30000
 
 const renderAll = (
   shotRenderer, cameraPlotRenderer,
@@ -72,14 +73,59 @@ const renderCameraPlot = (renderer, scene, originalCamera) => {
   renderer.render(scene, camera)
 }
 
-const saveCurrentShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio) => (dispatch, getState) => {
-  let state = getState()
+const waitForRender = () =>
+  new Promise(resolve => setTimeout(resolve, 0))
 
+const requestBoardUpdate = (channel, payload) =>
+  new Promise((resolve, reject) => {
+    let timeoutId
+
+    const cleanup = () => {
+      clearTimeout(timeoutId)
+      ipcRenderer.removeListener('update', onUpdate)
+      ipcRenderer.removeListener('shot-generator:error', onError)
+    }
+
+    const onUpdate = (event, { board }) => {
+      cleanup()
+
+      if (!board) {
+        reject(new Error('Storyboarder did not return a board update.'))
+        return
+      }
+
+      resolve(board)
+    }
+
+    const onError = (event, error = {}) => {
+      cleanup()
+      reject(new Error(error.message || 'Storyboarder failed to save the shot.'))
+    }
+
+    timeoutId = setTimeout(() => {
+      cleanup()
+      reject(new Error('Timed out waiting for Storyboarder to save the shot.'))
+    }, REQUEST_TIMEOUT_MS)
+
+    ipcRenderer.once('update', onUpdate)
+    ipcRenderer.once('shot-generator:error', onError)
+    ipcRenderer.send(channel, payload)
+  })
+
+const saveCurrentShot = (
+  shotRenderer, cameraPlotRenderer,
+  largeCanvasData, smallCanvasData,
+  shotSize, cameraPlotSize,
+  aspectRatio,
+  enqueueStoryboarderRequest
+) => (dispatch, getState) => {
   // de-select objects so they don't show in the saved image
   dispatch(selectObject(null))
 
-  // HACK slight delay to allow for re-render after the above changes
-  setTimeout(() => {
+  return enqueueStoryboarderRequest(async () => {
+    await waitForRender()
+
+    let state = getState()
     const { shotImageDataUrl, cameraPlotImageDataUrl } = renderAll(
       shotRenderer, cameraPlotRenderer,
       largeCanvasData, smallCanvasData,
@@ -91,7 +137,7 @@ const saveCurrentShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smal
     let currentBoard = state.board
     let uid = currentBoard.uid
 
-    ipcRenderer.send('saveShot', {
+    let board = await requestBoardUpdate('saveShot', {
       uid,
       data,
       images: {
@@ -101,19 +147,25 @@ const saveCurrentShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smal
     })
 
     dispatch(markSaved())
-  }, 0)
+
+    return board
+  })
 }
 
-const insertNewShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio) => (dispatch, getState) => {
-  let state = getState()
-
+const insertNewShot = (
+  shotRenderer, cameraPlotRenderer,
+  largeCanvasData, smallCanvasData,
+  shotSize, cameraPlotSize,
+  aspectRatio,
+  enqueueStoryboarderRequest
+) => (dispatch, getState) => {
   // de-select objects so they don't show in the saved image
   dispatch(selectObject(null))
 
-  // HACK slight delay to allow for re-render after the above changes
-  setTimeout(() => {
-    // mark as saved, to avoid a prompt that the scene is dirty when the scene reloads
-    dispatch(markSaved())
+  return enqueueStoryboarderRequest(async () => {
+    await waitForRender()
+
+    let state = getState()
 
     const { shotImageDataUrl, cameraPlotImageDataUrl } = renderAll(
       shotRenderer, cameraPlotRenderer,
@@ -125,7 +177,7 @@ const insertNewShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smallC
     let data = getSerializedState(state)
     let currentBoard = state.board
 
-    ipcRenderer.send('insertShot', {
+    let board = await requestBoardUpdate('insertShot', {
       data,
       currentBoard,
       images: {
@@ -133,7 +185,11 @@ const insertNewShot = (shotRenderer, cameraPlotRenderer, largeCanvasData, smallC
         plot: cameraPlotImageDataUrl
       }
     })
-  }, 0)
+
+    dispatch(markSaved())
+
+    return board
+  })
 }
 
 const useSaveToStoryboarder = (largeCanvasData, smallCanvasData, aspectRatio, shadingMode, backgroundColor) => {
@@ -152,19 +208,44 @@ const useSaveToStoryboarder = (largeCanvasData, smallCanvasData, aspectRatio, sh
 
   const shotRenderer = useShadingEffect(imageRenderer.current, shadingMode, backgroundColor)
   const cameraPlotRenderer = useShadingEffect(imageRenderer.current, ShadingType.Outline, backgroundColor)
+  const requestQueueRef = useRef(Promise.resolve())
+
+  const enqueueStoryboarderRequest = useCallback(task => {
+    const request = requestQueueRef.current.then(task)
+    requestQueueRef.current = request.catch(() => undefined)
+    return request
+  }, [])
 
   const saveCurrentShotCb = useCallback(
     () => dispatch(
-      saveCurrentShot(shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio)
+      saveCurrentShot(
+        shotRenderer,
+        cameraPlotRenderer,
+        largeCanvasData,
+        smallCanvasData,
+        shotSize,
+        cameraPlotSize,
+        aspectRatio,
+        enqueueStoryboarderRequest
+      )
     ),
-    []
+    [dispatch, shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio, enqueueStoryboarderRequest]
   )
 
   const insertNewShotCb = useCallback(
     () => dispatch(
-      insertNewShot(shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio)
+      insertNewShot(
+        shotRenderer,
+        cameraPlotRenderer,
+        largeCanvasData,
+        smallCanvasData,
+        shotSize,
+        cameraPlotSize,
+        aspectRatio,
+        enqueueStoryboarderRequest
+      )
     ),
-    []
+    [dispatch, shotRenderer, cameraPlotRenderer, largeCanvasData, smallCanvasData, shotSize, cameraPlotSize, aspectRatio, enqueueStoryboarderRequest]
   )
 
   return {

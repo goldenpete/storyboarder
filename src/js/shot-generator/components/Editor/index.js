@@ -165,14 +165,32 @@ const Editor = React.memo(({
   const { insertNewShot, saveCurrentShot } = useSaveToStoryboarder(
     largeCanvasData, smallCanvasData, aspectRatio, world.shadingMode, world.backgroundColor
   )
-  useEffect(() => {
-    ipcRenderer.on('requestSaveShot', saveCurrentShot)
-    return () => ipcRenderer.removeListener('requestSaveShot', saveCurrentShot)
+  const onRequestSaveShot = useCallback(() => {
+    saveCurrentShot().catch(error => {
+      console.error(error)
+      notifications.notify({
+        message: `Could not save board.\n${error.message}`,
+        timing: 10
+      })
+    })
   }, [saveCurrentShot])
-  useEffect(() => {
-    ipcRenderer.on('requestInsertShot', insertNewShot)
-    return () => ipcRenderer.removeListener('requestInsertShot', insertNewShot)
+  const onRequestInsertShot = useCallback(() => {
+    insertNewShot().catch(error => {
+      console.error(error)
+      notifications.notify({
+        message: `Could not insert board.\n${error.message}`,
+        timing: 10
+      })
+    })
   }, [insertNewShot])
+  useEffect(() => {
+    ipcRenderer.on('requestSaveShot', onRequestSaveShot)
+    return () => ipcRenderer.removeListener('requestSaveShot', onRequestSaveShot)
+  }, [onRequestSaveShot])
+  useEffect(() => {
+    ipcRenderer.on('requestInsertShot', onRequestInsertShot)
+    return () => ipcRenderer.removeListener('requestInsertShot', onRequestInsertShot)
+  }, [onRequestInsertShot])
 
   useExportToGltf( mainCanvasData.scene, withState)
 
