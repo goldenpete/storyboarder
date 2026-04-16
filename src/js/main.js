@@ -165,37 +165,40 @@ const syncLanguages = (dir, isLanguageFile, array) => {
 }
 
 app.on('ready', async () => {
-  analytics.init(prefs.enableAnalytics)
+  try {
+    log.info('[startup] app ready')
+    analytics.init(prefs.enableAnalytics)
 
-  const exporterFfmpeg = require('./exporters/ffmpeg')
-  let ffmpegVersion = await exporterFfmpeg.checkVersion()
-  log.info('ffmpeg version', ffmpegVersion)
-  
-  // Initial set up of language-settings file
-  let settings = {builtInLanguages:[], customLanguages:[]}
-  let dir = path.join(__dirname, "locales")
-  syncLanguages(dir, (name, ext) => ext === ".json", settings.builtInLanguages)
-  dir = path.join(app.getPath('userData'), "locales")
-  syncLanguages(dir, (name, ext) => ext === ".json" && name !== "language-settings", settings.customLanguages)
-  if(Object.keys(languageSettings.getSettings()).length === 0) {
-    let appLocale = app.getLocale()
-    if(!settings.builtInLanguages.some((item) => item.fileName === app.getLocale())) {
-      appLocale = 'en-US'
-    }
-    settings.selectedLanguage = appLocale
-    settings.defaultLanguage = appLocale
-  } else {
-    let selectedLanguage = languageSettings.getSettingByKey("selectedLanguage")
-    if(!settings.builtInLanguages.some((item) => item.fileName === selectedLanguage) &&
-    !settings.customLanguages.some((item) => item.fileName === selectedLanguage)) {
-    settings.selectedLanguage = languageSettings.getSettingByKey("defaultLanguage")
-}
+    const exporterFfmpeg = require('./exporters/ffmpeg')
+    let ffmpegVersion = await exporterFfmpeg.checkVersion()
+    log.info('[startup] ffmpeg version', ffmpegVersion)
+    
+    // Initial set up of language-settings file
+    let settings = {builtInLanguages:[], customLanguages:[]}
+    let dir = path.join(__dirname, "locales")
+    syncLanguages(dir, (name, ext) => ext === ".json", settings.builtInLanguages)
+    dir = path.join(app.getPath('userData'), "locales")
+    syncLanguages(dir, (name, ext) => ext === ".json" && name !== "language-settings", settings.customLanguages)
+    if(Object.keys(languageSettings.getSettings()).length === 0) {
+      let appLocale = app.getLocale()
+      if(!settings.builtInLanguages.some((item) => item.fileName === app.getLocale())) {
+        appLocale = 'en-US'
+      }
+      settings.selectedLanguage = appLocale
+      settings.defaultLanguage = appLocale
+    } else {
+      let selectedLanguage = languageSettings.getSettingByKey("selectedLanguage")
+      if(!settings.builtInLanguages.some((item) => item.fileName === selectedLanguage) &&
+      !settings.customLanguages.some((item) => item.fileName === selectedLanguage)) {
+      settings.selectedLanguage = languageSettings.getSettingByKey("defaultLanguage")
   }
+    }
 
 
 
-  languageSettings.setSettings(settings)
-  //TODO(): Check if files of custom languages exist
+    languageSettings.setSettings(settings)
+    log.info('[startup] language settings initialized')
+    //TODO(): Check if files of custom languages exist
 
 
 
@@ -334,73 +337,82 @@ app.on('ready', async () => {
 
 
 
-  // setup the menu
-  createMenu({
-    store,
-    send: (event, ...rest) => menuBus.emit(event, event, ...rest)
-  })
+    // setup the menu
+    createMenu({
+      store,
+      send: (event, ...rest) => menuBus.emit(event, event, ...rest)
+    })
+    log.info('[startup] menu created')
 
 
 
-  // open the welcome window when the app loads up first
-  openWelcomeWindow()
+    // open the welcome window when the app loads up first
+    openWelcomeWindow()
+    log.info('[startup] welcome window requested')
 
-  if (process.env.STORYBOARDER_SMOKE_PROJECT) {
-    let filePath = path.resolve(process.env.STORYBOARDER_SMOKE_PROJECT)
+    if (process.env.STORYBOARDER_SMOKE_PROJECT) {
+      let filePath = path.resolve(process.env.STORYBOARDER_SMOKE_PROJECT)
 
-    if (fs.existsSync(filePath)) {
-      setTimeout(() => openFile(filePath), 300)
-
-      welcomeWindow.hide()
-      welcomeWindow.removeAllListeners('ready-to-show')
-      return
-    }
-
-    log.error('Could not load smoke test project', filePath)
-    dialog.showErrorBox(
-      'Could not load smoke test project',
-      `Error loading ${filePath}`
-    )
-    finishSmokeTest(1)
-    return
-  }
-
-  // TODO why is loading via arg limited to dev mode only?
-  // was an argument passed?
-  if (isDev) {
-    // via https://github.com/electron/electron/issues/4690#issuecomment-217435222
-    const argv = process.defaultApp ? process.argv.slice(2) : process.argv
-
-    if (argv[0]) {
-      let filePath = path.resolve(argv[0])
       if (fs.existsSync(filePath)) {
-
-        // wait 300 msecs for windows to load
         setTimeout(() => openFile(filePath), 300)
 
-        // prevent welcomeWindow from popping up
         welcomeWindow.hide()
         welcomeWindow.removeAllListeners('ready-to-show')
         return
+      }
 
-      } else {
-        log.error('Could not load', filePath)
-        dialog.showErrorBox(
-          'Could not load requested file',
-          `Error loading ${filePath}`
-        )
+      log.error('Could not load smoke test project', filePath)
+      dialog.showErrorBox(
+        'Could not load smoke test project',
+        `Error loading ${filePath}`
+      )
+      finishSmokeTest(1)
+      return
+    }
+
+    // TODO why is loading via arg limited to dev mode only?
+    // was an argument passed?
+    if (isDev) {
+      // via https://github.com/electron/electron/issues/4690#issuecomment-217435222
+      const argv = process.defaultApp ? process.argv.slice(2) : process.argv
+
+      if (argv[0]) {
+        let filePath = path.resolve(argv[0])
+        if (fs.existsSync(filePath)) {
+
+          // wait 300 msecs for windows to load
+          setTimeout(() => openFile(filePath), 300)
+
+          // prevent welcomeWindow from popping up
+          welcomeWindow.hide()
+          welcomeWindow.removeAllListeners('ready-to-show')
+          return
+
+        } else {
+          log.error('Could not load', filePath)
+          dialog.showErrorBox(
+            'Could not load requested file',
+            `Error loading ${filePath}`
+          )
+        }
       }
     }
+
+    // this only works on mac.
+    if (toBeOpenedPath) {
+      openFile(toBeOpenedPath)
+      return
+    }
+
+
+    setInterval(()=>{ analytics.ping() }, 60*1000)
+  } catch (error) {
+    log.error('[startup] ready handler failed', error)
+    dialog.showErrorBox(
+      'Storyboarder failed to start',
+      error && error.stack ? error.stack : String(error)
+    )
   }
-
-  // this only works on mac.
-  if (toBeOpenedPath) {
-    openFile(toBeOpenedPath)
-    return
-  }
-
-
-  setInterval(()=>{ analytics.ping() }, 60*1000)
 })
 
 let openKeyCommandWindow = () => {
@@ -480,6 +492,7 @@ let openWelcomeWindow = () => {
     height: 600,
     center: true,
     show: false,
+    paintWhenInitiallyHidden: true,
     resizable: false,
     frame: false,
     webPreferences: {
@@ -489,7 +502,41 @@ let openWelcomeWindow = () => {
     }
   })
   remoteMain.enable(welcomeWindow.webContents)
-  welcomeWindow.loadURL(`file://${__dirname}/../welcome.html`)
+  const showWelcomeWindow = () => {
+    if (!welcomeWindow || welcomeWindow.isDestroyed() || welcomeWindow.isVisible()) return
+
+    welcomeWindow.show()
+
+    if (!isDev) autoUpdater.init()
+    analytics.screenView('welcome')
+  }
+
+  welcomeWindow.webContents.once('did-finish-load', () => {
+    log.info('[welcomeWindow] did-finish-load')
+    setTimeout(showWelcomeWindow, 300)
+  })
+
+  welcomeWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return
+
+    log.error('[welcomeWindow] did-fail-load', errorCode, errorDescription, validatedURL)
+    setTimeout(showWelcomeWindow, 300)
+  })
+
+  welcomeWindow.webContents.on('render-process-gone', (event, details) => {
+    log.error('[welcomeWindow] render-process-gone', details)
+  })
+
+  const welcomeWindowFallbackTimer = setTimeout(() => {
+    log.warn('[welcomeWindow] showing window after fallback timeout')
+    showWelcomeWindow()
+  }, 3000)
+  if (welcomeWindowFallbackTimer.unref) welcomeWindowFallbackTimer.unref()
+
+  welcomeWindow.loadURL(`file://${__dirname}/../welcome.html`).catch(error => {
+    log.error('[welcomeWindow] loadURL failed', error)
+    setTimeout(showWelcomeWindow, 300)
+  })
 
   newWindow = new BrowserWindow({
     width: 640,
@@ -527,12 +574,8 @@ let openWelcomeWindow = () => {
   }
 
   welcomeWindow.once('ready-to-show', () => {
-    setTimeout(() => {
-      welcomeWindow.show()
-      if (!isDev) autoUpdater.init()
-      analytics.screenView('welcome')
-    }, 300)
-
+    log.info('[welcomeWindow] ready-to-show')
+    setTimeout(showWelcomeWindow, 300)
   })
 
   welcomeWindow.once('close', () => {

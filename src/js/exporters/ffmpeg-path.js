@@ -53,13 +53,14 @@ const collectFfmpegCandidatePaths = ({
 
   const candidates = [
     env.STORYBOARDER_FFMPEG_PATH,
-    env.FFMPEG_PATH,
-    reportedPath
+    env.FFMPEG_PATH
   ]
 
   if (reportedPath && reportedPath.includes('app.asar')) {
     candidates.push(reportedPath.replace('app.asar', 'app.asar.unpacked'))
   }
+
+  candidates.push(reportedPath)
 
   if (mainModuleFilename && mainModuleFilename.includes('app.asar')) {
     const asarIndex = mainModuleFilename.indexOf('app.asar')

@@ -104,7 +104,9 @@ const load = () => {
 const savePrefs = (newPref) => {
   // log.info('SAVEPREFS')
   if (!newPref) return
-  if (Object.equals(newPref,prefs)) {
+  fs.ensureDirSync(path.dirname(prefFile))
+  const shouldWrite = !fs.existsSync(prefFile) || !Object.equals(newPref, prefs)
+  if (!shouldWrite) {
     // log.info("IM THE SAME!!!!")
   } else {
     prefs = newPref

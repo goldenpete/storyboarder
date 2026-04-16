@@ -48,6 +48,25 @@ describe('exporters/ffmpeg-path', () => {
     )
   })
 
+  it('prefers the unpacked asar binary even if the asar path also exists', () => {
+    const resolvedPath = resolveFfmpegPath({
+      env: {},
+      reportedPath: '/app/resources/app.asar/node_modules/ffmpeg-static/ffmpeg',
+      mainModuleFilename: '/app/resources/app.asar/dist/main.js',
+      resourcesPath: '/app/resources',
+      platform: 'linux',
+      existsSync: candidate => [
+        '/app/resources/app.asar/node_modules/ffmpeg-static/ffmpeg',
+        '/app/resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg'
+      ].map(path.normalize).includes(candidate)
+    })
+
+    assert.strictEqual(
+      resolvedPath,
+      path.normalize('/app/resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg')
+    )
+  })
+
   it('returns the reported path when no candidates exist', () => {
     const resolvedPath = resolveFfmpegPath({
       env: {},
